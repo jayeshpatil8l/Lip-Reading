@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>WebRTC Lip Reading</title>
+    <style>
+        /* Centering the container */
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            width: 500px;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        video {
+            width: 400px;
+            height: 300px;
+            background: black;
+            margin-top: 10px;
+        }
+
+        .buttons {
+            margin-top: 15px;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="labels">
+            <h1>Real-time Lip Reading</h1>
+            <video id="video" autoplay playsinline></video>
+            <h2>Predicted Text: <span id="prediction"></span></h2>
+        </div>
+        <div class="buttons">
+            <button onclick="startSending()">Start Sending</button>
+            <button onclick="stopSending()">Stop Sending</button>
+        </div>
+    </div>
+
+    <script>
+        let pc = new RTCPeerConnection();
+        let ws = new WebSocket("ws://localhost:8000/ws");  // Connect to WebSocket
+
+        async function startWebRTC() {
+            let stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            document.getElementById("video").srcObject = stream;
+
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+            let offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            let response = await fetch("/offer", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+            });
+
+            let answer = await response.json();
+            await pc.setRemoteDescription(answer);
+        }
+
+        function stopSending() {
+            ws.send("stop");
+        }
+
+        let text = "";  // Store predictions
+
+        function startSending() {
+            ws.send("start");  // Send "start" signal to WebSocket
+            text = "";  // Reset text when starting
+            document.getElementById("prediction").innerText = text;  // Reset UI
+        }
+
+        // Receive prediction from WebSocket
+        ws.onmessage = (event) => {
+            text += event.data + " ";  // Append new prediction
+            document.getElementById("prediction").innerText = text;  // Update UI
+        };
+
+        startWebRTC();
+    </script>
+</body>
+</html>
