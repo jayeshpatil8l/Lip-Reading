@@ -172,10 +172,10 @@ class LipReadingTrack(VideoStreamTrack):
             self.frame_queue.append(preprocessed_frame)  # Store frame in the queue
             print(f"Frame received. Queue size: {len(self.frame_queue)}")
             
-            message = prepare_websocket_message(frame = preprocessed_frame)
-            for websocket in connected_clients:
-                await websocket.send_text(message)
-                logger.info("Frame Sent!")
+            # message = prepare_websocket_message(frame = preprocessed_frame)
+            # for websocket in connected_clients:
+            #     await websocket.send_text(message)
+            #     logger.info("Frame Sent!")
 
             # Start processing if not already running
             if not self.processing and len(self.frame_queue) >= 25:

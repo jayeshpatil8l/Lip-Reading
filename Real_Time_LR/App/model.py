@@ -68,7 +68,7 @@ class LipReadingModel:
 
         logger.info("Built the model architecture successfully.")
 
-        model.load_weights(filepath = os.path.join(".","Models","model_f25.weights.h5"))
+        model.load_weights(filepath = os.path.join(".","Models","model_f25_set1.weights.h5"))
 
         logger.info("Model Loaded Successfully!")
 
