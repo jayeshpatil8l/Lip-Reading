@@ -69,9 +69,12 @@ def preprocessframe(frame):
             frame_gs = cv2.resize(frame_gs, (width, height))
             frame_gs = np.expand_dims(frame_gs, axis = -1)
             
-            break
+            # mean = np.mean(frame_gs)
+            # std = np.std(frame_gs) 
+            # frame_gs = (frame_gs - mean) / std
     else:
         logger.info("Face Not Detected")
+        return None
 
     logger.info("Grayscaled Frame Shape: " + str(frame_gs.shape))        
     return frame_gs
@@ -119,6 +122,7 @@ def get_corrected_preds(prediction):
             corrected_pred += word + " "
 
     return corrected_pred.strip()
+    
 
 def normalize_frames(frames):
     mean = np.mean(frames)

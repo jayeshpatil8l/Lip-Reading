@@ -5,6 +5,7 @@ from tensorflow.keras.models import Model # type: ignore
 import logging
 import numpy as np
 from utils import get_corrected_preds
+import jiwer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ class LipReadingModel:
         self.height = 46
         self.width = 140
         self.channels = 1
+        self.predictions = []
 
         vocab = [x for x in "abcdefghijklmnopqrstuvwxyz'?!123456789 "]
         self.char_to_num = tf.keras.layers.StringLookup(vocabulary=vocab, oov_token="")
@@ -24,7 +26,7 @@ class LipReadingModel:
         self.vocab_size = self.num_to_char.vocabulary_size()
 
         self.model = self.build_model()
-        self.reset_model_states()
+        # self.reset_model_states()
 
 
     def build_model(self):
@@ -84,11 +86,22 @@ class LipReadingModel:
         predicted = tf.strings.reduce_join([self.num_to_char(word) for word in decoded[0]]).numpy().decode('utf-8')
         prediction = get_corrected_preds(predicted)
 
+        self.predictions.append(prediction)
+
         logger.info(f"Model Predicted: {prediction}")
 
         return prediction
     
+    def get_accuracy(self, y_true):
+        y_pred = ' '.join(self.predictions)
+        wer = jiwer.wer(y_true, y_pred)
+        if y_pred == '':
+            return {'accuracy':'-', 'wer':'-'}
+        else :
+            return {'accuracy':f"{((1 -  wer)* 100):.2f}%", 'wer': f"{(wer * 100):.2f}%"}
+    
     def reset_model_states(self):
+        self.predictions = []
         for layer in self.model.layers:
             if isinstance(layer, tf.keras.layers.Bidirectional):
                 layer.reset_states()

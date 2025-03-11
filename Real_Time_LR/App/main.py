@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from fastapi.responses import HTMLResponse
 import numpy as np
@@ -10,6 +11,7 @@ from contextlib import asynccontextmanager
 from utils import preprocessframe, prepare_websocket_message, normalize_frames
 from model import LipReadingModel
 import concurrent.futures
+import pickle
 
 # Create a process pool with 2 workers
 pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -38,7 +40,9 @@ logger = logging.getLogger(__name__)
 # Store active peer connections & WebSocket clients
 pcs = set()
 connected_clients = set()
-should_send_frames = False  # Flag to control frame sending
+should_send_frames = False # Flag to control frame sending
+y_true = ""
+ 
 
 # # WebRTC Video Stream Processing
 # class LipReadingTrack(VideoStreamTrack):
@@ -82,23 +86,42 @@ should_send_frames = False  # Flag to control frame sending
 async def index():
     return open("index1.html").read()
 
+@app.get("/alignments")
+async def get_alignments():
+    try:
+        with open("alignments.pkl", "rb") as file:
+            alignments = pickle.load(file)
+            logger.info('alignments loaded!')
+        return alignments
+    except Exception as e:
+        return {"error": str(e)}
+
 # WebSocket Route
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     global should_send_frames
+    # global y_true
     await websocket.accept()
     connected_clients.add(websocket)
+    
 
     try:
         while True:
             data = await websocket.receive_text()
-            if data == "start":
+            parsed_data = json.loads(data)
+            message = parsed_data.get("message")  # Extract message
+            alignment = parsed_data.get("alignment")  # Extract alignment
+
+            if message == "start":
                 should_send_frames = True
-                logger.info("Frame sending started.")
-            elif data == "stop":
-                should_send_frames = False
                 model.reset_model_states()
+                globals()['y_true']  = alignment
+                logger.info("Frame sending started.")
+            elif message == "stop":
+                should_send_frames = False  
                 logger.info("Frame sending stopped.")
+               
+
     except:
         connected_clients.remove(websocket)
 
@@ -161,6 +184,7 @@ class LipReadingTrack(VideoStreamTrack):
         self.count = 1
 
     async def recv(self):
+        global y_true
         frame = await self.track.recv() 
         if self.count == 1:
             logger.info("Started!")
@@ -169,28 +193,34 @@ class LipReadingTrack(VideoStreamTrack):
         if should_send_frames: 
             img = frame.to_ndarray(format="bgr24")  
             preprocessed_frame = preprocessframe(img)
-            self.frame_queue.append(preprocessed_frame)  # Store frame in the queue
-            print(f"Frame received. Queue size: {len(self.frame_queue)}")
+            if preprocessed_frame is not None:
+                self.frame_queue.append(preprocessed_frame)  # Store frame in the queue
+                print(f"Frame received. Queue size: {len(self.frame_queue)}")
             
-            # message = prepare_websocket_message(frame = preprocessed_frame)
-            # for websocket in connected_clients:
-            #     await websocket.send_text(message)
-            #     logger.info("Frame Sent!")
+                message = prepare_websocket_message(frame = preprocessed_frame)
+                for websocket in connected_clients:
+                    await websocket.send_text(message)
+                    logger.info("Frame Sent!")
 
             # Start processing if not already running
             if not self.processing and len(self.frame_queue) >= 25:
                 await self.process_queue()
 
-        if not should_send_frames and len(self.frame_queue)> 0: 
+        if not should_send_frames and len(self.frame_queue) > 0: 
             await self.process_queue()
             print(f"Queue size: {len(self.frame_queue)}")
+            print(y_true)
+            accuracy = model.get_accuracy(y_true)
+            for websocket in connected_clients:
+                await websocket.send_json(accuracy)
+            y_true = ""
 
         return frame # Return the frame (unused in WebRTC processing)
 
     async def process_queue(self):
         self.processing = True  # Mark processing as active
-
         length = len(self.frame_queue)
+        # global y_true
         
         while len(self.frame_queue) > 0:  # Process as long as frames exist
             num_frames = min(len(self.frame_queue), 25)  # Take max 25 frames or remaining frames
@@ -198,7 +228,7 @@ class LipReadingTrack(VideoStreamTrack):
             frames = normalize_frames(frames_batch)
             
             # text_prediction = model.predict(frames_batch)  # Run model
-            text_prediction = await asyncio.get_event_loop().run_in_executor(pool, model.predict, frames) # running the model inference in another process to acheive multiprocessing
+            text_prediction = await asyncio.get_event_loop().run_in_executor(pool, model.predict, frames ) # running the model inference in another process to acheive multiprocessing
             await self.send_prediction(text_prediction)  # Send prediction
 
         # if self.frame_queue:  # If frames remain, process them
@@ -208,7 +238,13 @@ class LipReadingTrack(VideoStreamTrack):
         #     await self.send_prediction(text_prediction)
         
         self.processing = False  # Mark processing as finished
+        # if not should_send_frames:
+        #     accuracy = model.get_accuracy(y_true)
+        #     for websocket in connected_clients:
+        #         await websocket.send_json(accuracy)
+        #     y_true = ""
 
+        
     async def send_prediction(self, prediction):
         # Broadcast prediction to all WebSocket clients
         message = prepare_websocket_message(prediction = prediction)
